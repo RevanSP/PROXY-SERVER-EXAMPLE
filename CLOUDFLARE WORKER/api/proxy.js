@@ -5,36 +5,64 @@ addEventListener('fetch', event => {
 async function handleRequest(request) {
     const url = new URL(request.url);
 
-    if (url.pathname === '/') {
-        return Response.redirect(`${url.origin}/api/proxy`, 301);
+    if (url.pathname === '/' || url.pathname.startsWith('/api/proxy')) {
+        return handleProxyRequest(request);
     }
 
-    if (url.pathname === '/api/proxy') {
-        const urlParams = url.searchParams;
-        const targetUrl = urlParams.get('url');
-
-        if (!targetUrl) {
-            return new Response(JSON.stringify({ error: 'URL parameter is required' }), { status: 400 });
+    return new Response(JSON.stringify({ error: 'Not Found' }), {
+        status: 404,
+        headers: {
+            'Content-Type': 'application/json'
         }
+    });
+}
 
-        try {
-            const response = await fetch(decodeURIComponent(targetUrl));
-            const contentType = response.headers.get('content-type');
-            const body = await response.arrayBuffer();
+async function handleProxyRequest(request) {
+    const url = new URL(request.url);
+    const targetUrl = url.searchParams.get('url');
 
-            return new Response(body, {
+    if (!targetUrl) {
+        return new Response(JSON.stringify({ error: 'URL parameter is required' }), {
+            status: 400,
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+    }
+
+    try {
+        const decodedUrl = decodeURIComponent(targetUrl);
+        const response = await fetch(decodedUrl);
+
+        if (!response.ok) {
+            return new Response(JSON.stringify({ error: 'Failed to fetch the resource' }), {
+                status: response.status,
                 headers: {
-                    'Content-Type': contentType || 'application/octet-stream',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-                    'Access-Control-Allow-Headers': 'Content-Type',
-                },
+                    'Content-Type': 'application/json'
+                }
             });
-        } catch (error) {
-            console.error('Error fetching the URL:', error);
-            return new Response(JSON.stringify({ error: 'Failed to fetch the resource' }), { status: 500 });
         }
-    }
 
-    return new Response('Not Found', { status: 404 });
+        const body = await response.arrayBuffer();
+        const contentType = response.headers.get('content-type') || 'application/octet-stream';
+
+        const headers = {
+            'Content-Type': contentType,
+            'Access-Control-Allow-Methods': 'GET, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+            'Access-Control-Allow-Origin': ['*'].includes(request.headers.get('Origin'))
+                ? request.headers.get('Origin')
+                : ''
+        };
+
+        return new Response(body, { headers });
+    } catch (error) {
+        console.error('Error fetching the resource:', error);
+        return new Response(JSON.stringify({ error: 'Failed to fetch the resource' }), {
+            status: 500,
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+    }
 }
